@@ -15,6 +15,11 @@
 clear; clc; close all;
 
 % ------------------------------------------
+% user config: camber-sensitivity plots (section 8)
+% set the normal force used for the camber plots — change to 600, 1000, etc.
+fz_camber = 600;   % [N] normal force case for the camber sensitivity figures
+
+% ------------------------------------------
 % section 1: load all hoosier 43075 16x7.5-10 r20 cornering runs
 
 
@@ -355,34 +360,70 @@ legend('Location', 'best');
 grid on; box on;
 
 % -------------------------------------------------------------------------
-% section 8: plot 3 — camber (ia) effect at a fixed normal force
+% section 8: plot 3 — 3D camber (ia) surface at a fixed normal force
 %
 % positive camber (tire leaning inward toward car centerline) shifts and
 % increases the lateral force curve — this informs static camber selection
-% and camber gain targets in suspension kinematics design
+% and camber gain targets in suspension kinematics design.
+%
+% rendered as a 3D surface FY(SA, IA): the model is evaluated on a continuous
+% camber grid so the behaviour BETWEEN the tested angles (0, 2, 4 deg) is
+% interpolated by the fitted pacejka model rather than only shown at the three
+% discrete sweeps. the tested angles are overlaid as solid black lines so the
+% surface can be read against the data that anchors it.
 % -------------------------------------------------------------------------
 
-ia_vals  = [0, 2, 4];   % camber angles to compare [deg]
-fz_fixed = 600;          % representative mid-corner load for an fsae car [N]
+ia_vals   = [0, 2, 4];   % tested camber angles (overlaid as reference lines) [deg]
+fz_fixed  = fz_camber;    % normal force case set at top of file [N]
+ia_grid_v = linspace(0, 4, 60);   % continuous camber sweep between tested angles [deg]
 
-figure('Name', 'Camber Sensitivity — FZ = 600 N', 'Position', [180 180 900 600]);
+% --- 2D camber sensitivity (discrete tested angles, no interpolation) ---
+figure('Name', sprintf('Camber Sensitivity 2D — FZ = %d N', fz_fixed), ...
+       'Position', [150 150 900 600]);
 hold on;
-cmap_ia = lines(length(ia_vals));
-
+cmap_ia2d = lines(length(ia_vals));
 for k = 1:length(ia_vals)
     FY_pred = mf_lateral(p_fit, sa_vec, ...
                           fz_fixed * ones(size(sa_vec)), ...
                           ia_vals(k) * ones(size(sa_vec)));
-    plot(sa_vec, FY_pred, 'Color', cmap_ia(k,:), 'LineWidth', 2, ...
+    plot(sa_vec, FY_pred, 'Color', cmap_ia2d(k,:), 'LineWidth', 2, ...
          'DisplayName', sprintf('\\gamma = %d°', ia_vals(k)));
 end
-
 xline(0, '--k', 'Alpha', 0.25, 'HandleVisibility', 'off');
 xlabel('slip angle  \alpha  [deg]');
 ylabel('lateral force  F_Y  [N]');
 title(sprintf('camber sensitivity — F_Z = %d N', fz_fixed));
 legend('Location', 'best');
 grid on; box on;
+
+% --- 3D camber surface (interpolated between tested angles) ---
+% build the (SA, IA) grid and evaluate the fitted model over it
+[SA_ia, IA_ia] = meshgrid(sa_vec, ia_grid_v);
+FY_ia = mf_lateral(p_fit, SA_ia, ...
+                   fz_fixed * ones(size(SA_ia)), ...
+                   IA_ia);
+
+figure('Name', 'Camber Sensitivity Surface — FZ = 600 N', 'Position', [180 180 950 680]);
+surf(SA_ia, IA_ia, FY_ia, 'EdgeColor', 'none', 'FaceAlpha', 0.92);
+hold on;
+
+% overlay the tested camber angles as solid reference lines on the surface
+for k = 1:length(ia_vals)
+    FY_pred = mf_lateral(p_fit, sa_vec, ...
+                          fz_fixed * ones(size(sa_vec)), ...
+                          ia_vals(k) * ones(size(sa_vec)));
+    plot3(sa_vec, ia_vals(k) * ones(size(sa_vec)), FY_pred, 'k-', ...
+          'LineWidth', 1.5, 'DisplayName', sprintf('\\gamma = %d° (tested)', ia_vals(k)));
+end
+
+colormap jet;
+cb = colorbar; cb.Label.String = 'lateral force  F_Y  [N]';
+xlabel('slip angle  \alpha  [deg]');
+ylabel('camber  \gamma  [deg]');
+zlabel('lateral force  F_Y  [N]');
+title(sprintf('camber sensitivity surface — F_Z = %d N  (interpolated between tested 0/2/4°)', fz_fixed));
+legend('Location', 'best');
+view(-135, 25); grid on; box on;
 
 % -------------------------------------------------------------------------
 % section 9: peak grip summary table
