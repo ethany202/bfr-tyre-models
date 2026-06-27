@@ -15,6 +15,11 @@
 clear; clc; close all;
 
 % ------------------------------------------
+% user config: camber-sensitivity plots (section 8)
+% set the normal force used for the camber plots — change to 600, 1000, etc.
+fz_camber = 600;   % [N] normal force case for the camber sensitivity figures
+
+% ------------------------------------------
 % section 1: load all hoosier 43075 16x7.5-10 r20 cornering runs
 
 
@@ -355,34 +360,112 @@ legend('Location', 'best');
 grid on; box on;
 
 % -------------------------------------------------------------------------
-% section 8: plot 3 — camber (ia) effect at a fixed normal force
+% section 8: plot 3 — 3D camber (ia) surface at a fixed normal force
 %
 % positive camber (tire leaning inward toward car centerline) shifts and
 % increases the lateral force curve — this informs static camber selection
-% and camber gain targets in suspension kinematics design
+% and camber gain targets in suspension kinematics design.
+%
+% rendered as a 3D surface FY(SA, IA): the model is evaluated on a continuous
+% camber grid so the behaviour BETWEEN the tested angles (0, 2, 4 deg) is
+% interpolated by the fitted pacejka model rather than only shown at the three
+% discrete sweeps. the tested angles are overlaid as solid black lines so the
+% surface can be read against the data that anchors it.
 % -------------------------------------------------------------------------
 
-ia_vals  = [0, 2, 4];   % camber angles to compare [deg]
-fz_fixed = 600;          % representative mid-corner load for an fsae car [N]
+ia_vals   = [0, 2, 4];   % tested camber angles (overlaid as reference lines) [deg]
+fz_fixed  = fz_camber;    % normal force case set at top of file [N]
+ia_grid_v = linspace(0, 4, 60);   % continuous camber sweep between tested angles [deg]
 
-figure('Name', 'Camber Sensitivity — FZ = 600 N', 'Position', [180 180 900 600]);
+% --- 2D camber sensitivity (discrete tested angles, no interpolation) ---
+figure('Name', sprintf('Camber Sensitivity 2D — FZ = %d N', fz_fixed), ...
+       'Position', [150 150 900 600]);
 hold on;
-cmap_ia = lines(length(ia_vals));
-
+cmap_ia2d = lines(length(ia_vals));
 for k = 1:length(ia_vals)
     FY_pred = mf_lateral(p_fit, sa_vec, ...
                           fz_fixed * ones(size(sa_vec)), ...
                           ia_vals(k) * ones(size(sa_vec)));
-    plot(sa_vec, FY_pred, 'Color', cmap_ia(k,:), 'LineWidth', 2, ...
+    plot(sa_vec, FY_pred, 'Color', cmap_ia2d(k,:), 'LineWidth', 2, ...
          'DisplayName', sprintf('\\gamma = %d°', ia_vals(k)));
 end
-
 xline(0, '--k', 'Alpha', 0.25, 'HandleVisibility', 'off');
 xlabel('slip angle  \alpha  [deg]');
 ylabel('lateral force  F_Y  [N]');
 title(sprintf('camber sensitivity — F_Z = %d N', fz_fixed));
 legend('Location', 'best');
 grid on; box on;
+
+% --- 3D camber surface (interpolated between tested angles) ---
+% build the (SA, IA) grid and evaluate the fitted model over it
+[SA_ia, IA_ia] = meshgrid(sa_vec, ia_grid_v);
+FY_ia = mf_lateral(p_fit, SA_ia, ...
+                   fz_fixed * ones(size(SA_ia)), ...
+                   IA_ia);
+
+figure('Name', 'Camber Sensitivity Surface — FZ = 600 N', 'Position', [180 180 950 680]);
+surf(SA_ia, IA_ia, FY_ia, 'EdgeColor', 'none', 'FaceAlpha', 0.92);
+hold on;
+
+% overlay the tested camber angles as solid reference lines on the surface
+for k = 1:length(ia_vals)
+    FY_pred = mf_lateral(p_fit, sa_vec, ...
+                          fz_fixed * ones(size(sa_vec)), ...
+                          ia_vals(k) * ones(size(sa_vec)));
+    plot3(sa_vec, ia_vals(k) * ones(size(sa_vec)), FY_pred, 'k-', ...
+          'LineWidth', 1.5, 'DisplayName', sprintf('\\gamma = %d° (tested)', ia_vals(k)));
+end
+
+colormap jet;
+cb = colorbar; cb.Label.String = 'lateral force  F_Y  [N]';
+xlabel('slip angle  \alpha  [deg]');
+ylabel('camber  \gamma  [deg]');
+zlabel('lateral force  F_Y  [N]');
+title(sprintf('camber sensitivity surface — F_Z = %d N  (interpolated between tested 0/2/4°)', fz_fixed));
+legend('Location', 'best');
+view(-135, 25); grid on; box on;
+
+% -------------------------------------------------------------------------
+% section 8b: additional camber-sensitivity plots at other normal forces
+%
+% same 2D camber sweep as section 8 (FY vs SA, one curve per tested camber
+% angle), repeated at extra normal-force cases requested for setup work:
+% a high-load case (1200 N) and a light-load case (~300 N). each case is only
+% plotted if the TTC dataset actually contains points near that load — the
+% fitted model would happily extrapolate, but a curve anchored to a load level
+% with no measured support would be misleading, so we guard on data existence.
+% -------------------------------------------------------------------------
+
+fz_camber_extra = [1200, 300];   % [N] additional normal-force cases to plot
+fz_data_tol     = 80;            % [N] window for the "is there data here?" check
+min_pts_camber  = 30;            % require at least this many measured points
+
+for fz_c = fz_camber_extra
+    % only plot if measured data exists near this load (honours "if it exists")
+    n_near = sum(abs(FZ - fz_c) < fz_data_tol);
+    if n_near < min_pts_camber
+        fprintf(['skipping camber-sensitivity plot at F_Z = %d N ', ...
+                 '(only %d measured points near this load)\n'], fz_c, n_near);
+        continue;
+    end
+
+    figure('Name', sprintf('Camber Sensitivity 2D — FZ = %d N', fz_c), ...
+           'Position', [150 150 900 600]);
+    hold on;
+    for k = 1:length(ia_vals)
+        FY_pred = mf_lateral(p_fit, sa_vec, ...
+                              fz_c * ones(size(sa_vec)), ...
+                              ia_vals(k) * ones(size(sa_vec)));
+        plot(sa_vec, FY_pred, 'Color', cmap_ia2d(k,:), 'LineWidth', 2, ...
+             'DisplayName', sprintf('\\gamma = %d°', ia_vals(k)));
+    end
+    xline(0, '--k', 'Alpha', 0.25, 'HandleVisibility', 'off');
+    xlabel('slip angle  \alpha  [deg]');
+    ylabel('lateral force  F_Y  [N]');
+    title(sprintf('camber sensitivity — F_Z = %d N', fz_c));
+    legend('Location', 'best');
+    grid on; box on;
+end
 
 % -------------------------------------------------------------------------
 % section 9: peak grip summary table
@@ -451,6 +534,7 @@ fz_valid  = fz_valid(:);               % column vector
 cs_valid  = abs(CS_data(idx_valid));
 cs_valid  = cs_valid(:);               % column vector
 
+%{
 figure('Name', 'Cornering Stiffness vs Normal Force', 'Position', [230 230 1100 520]);
 
 % left subplot: absolute cornering stiffness
@@ -475,6 +559,7 @@ title('normalized cornering stiffness — diminishing returns with load');
 legend('Location', 'northeast'); grid on; box on;
 
 sgtitle('hoosier 43075 16x7.5-10 r20  —  cornering stiffness');
+%}
 
 % print cornering stiffness table
 fprintf('\ncornering stiffness summary  (IA = 0 deg):\n');
@@ -503,6 +588,7 @@ ia_surf = 0;                            % camber for the surface [deg]
 % evaluate the fitted model over the full grid (mf_lateral is element-wise)
 FY_surf = mf_lateral(p_fit, SA_grid, FZ_grid, ia_surf * ones(size(SA_grid)));
 
+%{
 figure('Name', 'FY surface — Hoosier 16x7.5-10 R20', 'Position', [280 280 950 680]);
 surf(SA_grid, FZ_grid, FY_surf, 'EdgeColor', 'none', 'FaceAlpha', 0.90);
 hold on;
@@ -521,6 +607,7 @@ zlabel('lateral force  F_Y  [N]');
 title(sprintf(['pacejka lateral force surface — IA = %d°  ', ...
                '(surface = model, dots = measured)'], ia_surf));
 view(-135, 25); grid on; box on;
+%}
 
 % -------------------------------------------------------------------------
 % section 10c: plot 5 — textbook-style lateral force vs slip angle at
@@ -545,6 +632,7 @@ sa_solid  = linspace(0, sa_test, 280);   % within tested range -> solid
 sa_dash   = linspace(sa_test, 30, 180);  % beyond tested range -> dashed (extrapolation)
 cmap_ia   = lines(length(ia_curves));    % default matlab colors (matches other plots)
 
+%{
 figure('Name', 'FY vs SA at multiple camber — textbook style', ...
        'Position', [330 330 900 600]);
 hold on;
@@ -580,6 +668,7 @@ title(sprintf('lateral force versus slip angle — F_Z = %d N  (dashed = extrapo
 legend('Location', 'southeast');
 xlim([0 30]); ylim([0 inf]);
 grid on; box on;
+%}
 
 % -------------------------------------------------------------------------
 % section 11: save tire model parameters
