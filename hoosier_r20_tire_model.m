@@ -48,7 +48,7 @@ for i = 1:n_files
     % only the hoosier 43075 16x7.5-10 r20 on the 8 inch rim.
     % the TTC tested this tire on both 7" and 8" rims; we want 8" only.
     if ~(contains(tire_str, '43075') && contains(tire_str, '16x7.5') ...
-            && contains(tire_str, '7 inch rim'))
+            && contains(tire_str, '8 inch rim'))
         continue;
     end
 
