@@ -19,6 +19,16 @@ clear; clc; close all;
 % set the normal force used for the camber plots — change to 600, 1000, etc.
 fz_camber = 600;   % [N] normal force case for the camber sensitivity figures
 
+% Represents the Fz loads experienced by all four tyres under max lateral acceleration [Front Inner, Front Outer, Rear Inner, Rear Outer]
+fz_lltd = [208, 1000, 244, 1173];
+
+% Dictionary of which plots we WANT to see (stored in a dictionary of form
+% (plot type, boolean)
+plot_names = ["FY vs SA", "mu_y vs SA", "Camber Sensitivity 2D", "Camber Sensitivity Surface"];
+plot_settings = [false, false, false, true];
+
+display_plot_dict = dictionary(plot_names, plot_settings);
+
 % ------------------------------------------
 % section 1: load all hoosier 43075 16x7.5-10 r20 cornering runs
 
@@ -279,6 +289,12 @@ for k = 1:length(p_fit)
     fprintf('  %-14s = %12.6f\n', tireParams.coeff_names{k}, p_fit(k));
 end
 
+% Defining re-used values for plots below
+fz_bins = [200, 400, 600, 800, 1000, 1200];  % [N] representative fsae corner loads
+fz_tol  = 60;                                 % [N] tolerance window around each bin
+sa_vec  = linspace(-14, 14, 300);             % slip angle sweep for model curves
+cmap    = jet(length(fz_bins));
+
 % -------------------------------------------------------------------------
 % section 6: plot 1 — lateral force vs slip angle at discrete fz levels
 %
@@ -286,50 +302,51 @@ end
 % primary validation plot: shows how well the model captures measured behavior
 % -------------------------------------------------------------------------
 
-fz_bins = [200, 400, 600, 800, 1000, 1200];  % [N] representative fsae corner loads
-fz_tol  = 60;                                 % [N] tolerance window around each bin
-sa_vec  = linspace(-14, 14, 300);             % slip angle sweep for model curves
-cmap    = jet(length(fz_bins));
+if display_plot_dict("FY vs SA")
+    
+    figure('Name', 'FY vs SA — Hoosier 16x7.5-10 R20', 'Position', [80 80 900 600]);
+    hold on;
+    
+    % preallocate to max possible size — trim unused entries after the loop
+    h_list     = gobjects(length(fz_bins), 1);
+    label_list = cell(length(fz_bins), 1);
+    n_plotted  = 0;
+    
+    for k = 1:length(fz_bins)
+        % select data near this fz bin at near-zero camber
+        idx = abs(FZ - fz_bins(k)) < fz_tol & abs(IA) < 0.5;
+        if sum(idx) < 30; continue; end
+    
+        % measured scatter — semi-transparent to reduce visual noise
+        scatter(SA(idx), FY(idx), 5, cmap(k,:), 'filled', ...
+                'MarkerFaceAlpha', 0.20, 'HandleVisibility', 'off');
+    
+        % model curve at this fz level and zero camber
+        FY_pred = mf_lateral(p_fit, sa_vec, ...
+                              fz_bins(k) * ones(size(sa_vec)), ...
+                              zeros(size(sa_vec)));
+        h = plot(sa_vec, FY_pred, 'Color', cmap(k,:), 'LineWidth', 2);
+    
+        n_plotted = n_plotted + 1;
+        h_list(n_plotted)     = h;
+        label_list{n_plotted} = sprintf('F_Z = %d N', fz_bins(k));
+    end
+    
+    % trim preallocated arrays to the number of bins that had sufficient data
+    if display_plot_dict("FY vs SA")
+        h_list     = h_list(1:n_plotted);
+        label_list = label_list(1:n_plotted);
+        
+        xline(0, '--k', 'Alpha', 0.25, 'HandleVisibility', 'off');
+        yline(0, '--k', 'Alpha', 0.25, 'HandleVisibility', 'off');
+        xlabel('slip angle  \alpha  [deg]');
+        ylabel('lateral force  F_Y  [N]');
+        title('lateral force vs slip angle — IA = 0°  (lines = model, dots = measured)');
+        legend(h_list, label_list, 'Location', 'best');
+        grid on; box on;
+    end
 
-figure('Name', 'FY vs SA — Hoosier 16x7.5-10 R20', 'Position', [80 80 900 600]);
-hold on;
-
-% preallocate to max possible size — trim unused entries after the loop
-h_list     = gobjects(length(fz_bins), 1);
-label_list = cell(length(fz_bins), 1);
-n_plotted  = 0;
-
-for k = 1:length(fz_bins)
-    % select data near this fz bin at near-zero camber
-    idx = abs(FZ - fz_bins(k)) < fz_tol & abs(IA) < 0.5;
-    if sum(idx) < 30; continue; end
-
-    % measured scatter — semi-transparent to reduce visual noise
-    scatter(SA(idx), FY(idx), 5, cmap(k,:), 'filled', ...
-            'MarkerFaceAlpha', 0.20, 'HandleVisibility', 'off');
-
-    % model curve at this fz level and zero camber
-    FY_pred = mf_lateral(p_fit, sa_vec, ...
-                          fz_bins(k) * ones(size(sa_vec)), ...
-                          zeros(size(sa_vec)));
-    h = plot(sa_vec, FY_pred, 'Color', cmap(k,:), 'LineWidth', 2);
-
-    n_plotted = n_plotted + 1;
-    h_list(n_plotted)     = h;
-    label_list{n_plotted} = sprintf('F_Z = %d N', fz_bins(k));
 end
-
-% trim preallocated arrays to the number of bins that had sufficient data
-h_list     = h_list(1:n_plotted);
-label_list = label_list(1:n_plotted);
-
-xline(0, '--k', 'Alpha', 0.25, 'HandleVisibility', 'off');
-yline(0, '--k', 'Alpha', 0.25, 'HandleVisibility', 'off');
-xlabel('slip angle  \alpha  [deg]');
-ylabel('lateral force  F_Y  [N]');
-title('lateral force vs slip angle — IA = 0°  (lines = model, dots = measured)');
-legend(h_list, label_list, 'Location', 'best');
-grid on; box on;
 
 % -------------------------------------------------------------------------
 % section 7: plot 2 — normalized lateral force (mu_y) vs slip angle
@@ -339,25 +356,29 @@ grid on; box on;
 % a critical input for suspension setup (stiffer arb = more load transfer = less total grip)
 % -------------------------------------------------------------------------
 
-figure('Name', 'mu_y vs SA — Load Sensitivity', 'Position', [130 130 900 600]);
-hold on;
+if display_plot_dict("mu_y vs SA")
 
-for k = 1:length(fz_bins)
-    FY_pred = mf_lateral(p_fit, sa_vec, ...
-                          fz_bins(k) * ones(size(sa_vec)), ...
-                          zeros(size(sa_vec)));
-    % normalize by normal force to get friction coefficient
-    mu_y = FY_pred / fz_bins(k);
-    plot(sa_vec, mu_y, 'Color', cmap(k,:), 'LineWidth', 2, ...
-         'DisplayName', sprintf('F_Z = %d N', fz_bins(k)));
+    figure('Name', 'mu_y vs SA — Load Sensitivity', 'Position', [130 130 900 600]);
+    hold on;
+    
+    for k = 1:length(fz_bins)
+        FY_pred = mf_lateral(p_fit, sa_vec, ...
+                              fz_bins(k) * ones(size(sa_vec)), ...
+                              zeros(size(sa_vec)));
+        % normalize by normal force to get friction coefficient
+        mu_y = FY_pred / fz_bins(k);
+        plot(sa_vec, mu_y, 'Color', cmap(k,:), 'LineWidth', 2, ...
+             'DisplayName', sprintf('F_Z = %d N', fz_bins(k)));
+    end
+    
+    xline(0, '--k', 'Alpha', 0.25, 'HandleVisibility', 'off');
+    xlabel('slip angle  \alpha  [deg]');
+    ylabel('\mu_y = F_Y / F_Z  [—]');
+    title('normalized lateral force vs slip angle — load sensitivity');
+    legend('Location', 'best');
+    grid on; box on;
+
 end
-
-xline(0, '--k', 'Alpha', 0.25, 'HandleVisibility', 'off');
-xlabel('slip angle  \alpha  [deg]');
-ylabel('\mu_y = F_Y / F_Z  [—]');
-title('normalized lateral force vs slip angle — load sensitivity');
-legend('Location', 'best');
-grid on; box on;
 
 % -------------------------------------------------------------------------
 % section 8: plot 3 — 3D camber (ia) surface at a fixed normal force
@@ -378,10 +399,23 @@ fz_fixed  = fz_camber;    % normal force case set at top of file [N]
 ia_grid_v = linspace(0, 4, 60);   % continuous camber sweep between tested angles [deg]
 
 % --- 2D camber sensitivity (discrete tested angles, no interpolation) ---
+
+% TODO: Perform for loop to generate interpolated plots for each Fz load
+% case
+%     for k = 1:length(fz_lltd)
+%           TODO: Then : iterate thru all possible camber values (separated
+%           by 0.1 deg or something similar ==> (0, 0.1, 0.2, ..., 2, 2.1,
+%           ..., 4)
+%           Sum up all values for a given collection of slip angles (1.5
+%           deg, 1.922 deg, 2.5 deg)
+    % ... move body below into here
+
+
 figure('Name', sprintf('Camber Sensitivity 2D — FZ = %d N', fz_fixed), ...
        'Position', [150 150 900 600]);
 hold on;
 cmap_ia2d = lines(length(ia_vals));
+
 for k = 1:length(ia_vals)
     FY_pred = mf_lateral(p_fit, sa_vec, ...
                           fz_fixed * ones(size(sa_vec)), ...
@@ -396,34 +430,94 @@ title(sprintf('camber sensitivity — F_Z = %d N', fz_fixed));
 legend('Location', 'best');
 grid on; box on;
 
+
 % --- 3D camber surface (interpolated between tested angles) ---
 % build the (SA, IA) grid and evaluate the fitted model over it
-[SA_ia, IA_ia] = meshgrid(sa_vec, ia_grid_v);
-FY_ia = mf_lateral(p_fit, SA_ia, ...
-                   fz_fixed * ones(size(SA_ia)), ...
-                   IA_ia);
 
-figure('Name', 'Camber Sensitivity Surface — FZ = 600 N', 'Position', [180 180 950 680]);
-surf(SA_ia, IA_ia, FY_ia, 'EdgeColor', 'none', 'FaceAlpha', 0.92);
-hold on;
+% Loops thru all load cases under max lateral acceleration to generate
+% camber mesh for all relevant tyre loads
 
-% overlay the tested camber angles as solid reference lines on the surface
-for k = 1:length(ia_vals)
-    FY_pred = mf_lateral(p_fit, sa_vec, ...
-                          fz_fixed * ones(size(sa_vec)), ...
-                          ia_vals(k) * ones(size(sa_vec)));
-    plot3(sa_vec, ia_vals(k) * ones(size(sa_vec)), FY_pred, 'k-', ...
-          'LineWidth', 1.5, 'DisplayName', sprintf('\\gamma = %d° (tested)', ia_vals(k)));
+ia_sum_vec = 0 : 0.05 : 4;                          % 41-point camber sweep
+
+fz_lltd_rear = [244, 1137];
+fy_sums_rear = dictionary(ia_sum_vec, zeros(size(ia_sum_vec)));
+
+for idx = 1:length(fz_lltd_rear)
+
+    curr_fz = fz_lltd_rear(idx);
+
+    [SA_ia, IA_ia] = meshgrid(sa_vec, ia_grid_v);
+    FY_ia = mf_lateral(p_fit, SA_ia, ...
+                       curr_fz * ones(size(SA_ia)), ...
+                       IA_ia);
+    
+    figure('Name', sprintf('Camber Sensitivity Surface — FZ = %d N', curr_fz), 'Position', [180 180 950 680]);
+    surf(SA_ia, IA_ia, FY_ia, 'EdgeColor', 'none', 'FaceAlpha', 0.92);
+    hold on;
+
+    % overlay the tested camber angles as solid reference lines on the surface
+    for k = 1:length(ia_vals)
+        FY_pred = mf_lateral(p_fit, sa_vec, ...
+                              curr_fz * ones(size(sa_vec)), ...
+                              ia_vals(k) * ones(size(sa_vec)));
+        plot3(sa_vec, ia_vals(k) * ones(size(sa_vec)), FY_pred, 'k-', ...
+              'LineWidth', 1.5, 'DisplayName', sprintf('\\gamma = %d° (tested)', ia_vals(k)));
+    end
+    
+    colormap jet;
+    cb = colorbar; cb.Label.String = 'lateral force  F_Y  [N]';
+    xlabel('slip angle  \alpha  [deg]');
+    ylabel('camber  \gamma  [deg]');
+    zlabel('lateral force  F_Y  [N]');
+    title(sprintf('camber sensitivity surface — F_Z = %d N  (interpolated between tested 0/2/4°)', curr_fz));
+    legend('Location', 'best');
+    view(-135, 25); grid on; box on;
+
+    % ── Camber sweep at fixed SA = 1.92°, 0 → 4° in 0.1° steps ──────────
+    rear_sa_positive   = 1.92;                                  % fixed slip angle [deg]
+    rear_sa_negative   = -1.92;
+
+    FY_rear_sa_positive = mf_lateral(p_fit, ...
+                              rear_sa_positive * ones(size(ia_sum_vec)), ...
+                              curr_fz    * ones(size(ia_sum_vec)), ...
+                              ia_sum_vec);               % [1 x 41]
+
+
+    FY_rear_sa_negative = mf_lateral(p_fit, ...
+                                rear_sa_negative * ones(size(ia_sum_vec)), ...
+                                curr_fz    * ones(size(ia_sum_vec)), ...
+                                ia_sum_vec);               % [1 x 41]
+
+    for k = 1:length(ia_sum_vec)
+        curr_camber_angle = ia_sum_vec(k);
+
+        fprintf('\nFZ = %d N  |  SA = %.2f deg  |  sum(FY) for REAR tyres at camber angle = %.2f deg\n', ...
+                 curr_fz, rear_sa_positive, curr_camber_angle);
+        
+        fy_sums_rear(curr_camber_angle) = fy_sums_rear(curr_camber_angle) + abs(FY_rear_sa_positive(k)) + abs(FY_rear_sa_negative(k));
+    end
+
 end
 
-colormap jet;
-cb = colorbar; cb.Label.String = 'lateral force  F_Y  [N]';
-xlabel('slip angle  \alpha  [deg]');
-ylabel('camber  \gamma  [deg]');
-zlabel('lateral force  F_Y  [N]');
-title(sprintf('camber sensitivity surface — F_Z = %d N  (interpolated between tested 0/2/4°)', fz_fixed));
-legend('Location', 'best');
-view(-135, 25); grid on; box on;
+fprintf('\nFY Sums Rear:\n')
+fprintf('\n====================\n')
+disp(fy_sums_rear)
+
+fy_sums_keys = keys(fy_sums_rear);
+fy_sums_values = values(fy_sums_rear);
+[max_fy, max_fy_idx] = max(fy_sums_values);
+fprintf('\nCamber angle gen. most FY: %d deg | FY generated: %d N\n', max_fy, fy_sums_keys(max_fy_idx));
+
+% ---- Mapping a histogram for Total FY Rear vs Camber Angle ----
+
+figure;
+bar(keys(fy_sums_rear), values(fy_sums_rear));
+% set(gca, 'xticketlabel', keys(fy_sums_rear));
+
+xlabel("Camber Angle")
+ylabel("Total FY Rear")
+title("Histogram of Total FY Rear for each Camber Angle")
+
 
 % -------------------------------------------------------------------------
 % section 8b: additional camber-sensitivity plots at other normal forces
@@ -436,9 +530,11 @@ view(-135, 25); grid on; box on;
 % with no measured support would be misleading, so we guard on data existence.
 % -------------------------------------------------------------------------
 
-fz_camber_extra = [1200, 300];   % [N] additional normal-force cases to plot
+% NOTE: These Fz camber values come from vertical load of tyres under max
+% lat. acceleration
+fz_camber_extra = [];   % [N] additional normal-force cases to plot
 fz_data_tol     = 80;            % [N] window for the "is there data here?" check
-min_pts_camber  = 30;            % require at least this many measured points
+min_pts_camber  = 40;            % require at least this many measured points
 
 for fz_c = fz_camber_extra
     % only plot if measured data exists near this load (honours "if it exists")
